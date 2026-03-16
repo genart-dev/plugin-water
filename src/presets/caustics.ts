@@ -1,0 +1,40 @@
+import type { CausticsPreset } from "./types.js";
+
+export const CAUSTICS_PRESETS: CausticsPreset[] = [
+  {
+    id: "shallow-caustics",
+    name: "Shallow Caustics",
+    category: "caustics",
+    description: "Bright caustic light patterns in clear shallow water over sand",
+    tags: ["shallow", "bright", "clear", "sand"],
+    clarity: 0.8,
+    causticScale: 0.5,
+    causticIntensity: 0.7,
+    bottomColor: "#C8B890",
+    lightAngle: 0.3,
+  },
+  {
+    id: "deep-pool-caustics",
+    name: "Deep Pool",
+    category: "caustics",
+    description: "Faint caustic shimmer in deeper clear water",
+    tags: ["deep", "pool", "faint", "clear"],
+    clarity: 0.5,
+    causticScale: 0.8,
+    causticIntensity: 0.3,
+    bottomColor: "#6A8070",
+    lightAngle: 0.2,
+  },
+  {
+    id: "tropical-caustics",
+    name: "Tropical Caustics",
+    category: "caustics",
+    description: "Vivid dancing caustics over white sand in tropical water",
+    tags: ["tropical", "vivid", "white-sand", "dancing"],
+    clarity: 0.9,
+    causticScale: 0.4,
+    causticIntensity: 0.9,
+    bottomColor: "#E8DCC0",
+    lightAngle: 0.5,
+  },
+];
