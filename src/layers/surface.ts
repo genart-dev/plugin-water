@@ -172,31 +172,54 @@ function renderCalm(p: ResolvedSurfaceProps, ctx: CanvasRenderingContext2D, bx: 
   ctx.fillStyle = grad;
   ctx.fillRect(bx, waterTop, width, waterHeight);
 
-  // Horizontal wave lines (stripe compositing)
+  // Paired dark-trough / bright-crest wave lines (ref: still-lake photo 3085701)
+  // Real calm water has alternating dark/bright bands from wave facets
   const rng = mulberry32(p.seed);
   const noise = createValueNoise(p.seed);
-  const lineCount = Math.max(3, Math.round(p.waveHeight * 30 + 5));
-  const step = Math.max(2, Math.round(width / 200));
+  const lineCount = Math.max(8, Math.round(p.waveHeight * 50 + 12));
+  const step = Math.max(2, Math.round(width / 250));
 
   for (let i = 0; i < lineCount; i++) {
+    // Depth-compressed spacing: lines cluster near surface, spread toward bottom
     const t = (i + 0.5) / lineCount;
-    const lineY = waterTop + t * waterHeight;
-    const alpha = Math.max(0.03, 0.2 * (1 - t));
+    const compressed = t * t; // quadratic compression — more lines near waterline
+    const lineY = waterTop + compressed * waterHeight;
+    const depthFade = 1 - compressed;
 
-    ctx.strokeStyle = `rgba(255,255,255,${alpha})`;
-    ctx.lineWidth = Math.max(0.3, 1 - t * 0.5);
+    // Dark trough line (slightly below)
+    const darkAlpha = Math.max(0.02, 0.12 * depthFade * (0.5 + p.waveHeight * 0.5));
+    ctx.strokeStyle = `rgba(0,0,0,${darkAlpha})`;
+    ctx.lineWidth = Math.max(0.5, (1.2 - compressed * 0.8) * (1 + p.waveHeight * 0.5));
     ctx.beginPath();
-
     for (let px = 0; px <= width; px += step) {
-      const offset = (noise(px * 0.01, i * 5) - 0.5) * p.waveHeight * 8;
+      const offset = (noise(px * 0.015, i * 5 + 1) - 0.5) * p.waveHeight * 6;
+      if (px === 0) ctx.moveTo(bx + px, lineY + offset + 1.5);
+      else ctx.lineTo(bx + px, lineY + offset + 1.5);
+    }
+    ctx.stroke();
+
+    // Bright crest line (on top)
+    const brightAlpha = Math.max(0.03, 0.25 * depthFade * (0.4 + p.waveHeight * 0.6));
+    ctx.strokeStyle = `rgba(255,255,255,${brightAlpha})`;
+    ctx.lineWidth = Math.max(0.3, (0.8 - compressed * 0.4));
+    ctx.beginPath();
+    for (let px = 0; px <= width; px += step) {
+      const offset = (noise(px * 0.015, i * 5) - 0.5) * p.waveHeight * 6;
       if (px === 0) ctx.moveTo(bx + px, lineY + offset);
       else ctx.lineTo(bx + px, lineY + offset);
     }
     ctx.stroke();
   }
 
-  // Shimmer highlights
+  // Horizon shimmer band — concentrated glare near waterline
   if (p.shimmerIntensity > 0) {
+    const bandHeight = waterHeight * 0.15;
+    const shimGrad = ctx.createLinearGradient(bx, waterTop, bx, waterTop + bandHeight);
+    shimGrad.addColorStop(0, `rgba(255,255,255,${p.shimmerIntensity * 0.08})`);
+    shimGrad.addColorStop(1, "rgba(255,255,255,0)");
+    ctx.fillStyle = shimGrad;
+    ctx.fillRect(bx, waterTop, width, bandHeight);
+
     renderShimmer(p, ctx, rng, bx, waterTop, width, waterHeight);
   }
 }
@@ -216,41 +239,65 @@ function renderOcean(p: ResolvedSurfaceProps, ctx: CanvasRenderingContext2D, bx:
   ctx.fillStyle = grad;
   ctx.fillRect(bx, waterTop, width, waterHeight);
 
-  // Gerstner wave lines
+  // Gerstner wave lines with per-segment slope shading (ref: stormy ocean 5949243)
+  // Real ocean waves have bright crests where light passes through thin water
+  // and dark troughs in shadow — strong value contrast
   const waves = buildGerstnerWaves(p.seed, p.waveComplexity, p.chop);
   const rng = mulberry32(p.seed);
-  const rowCount = Math.max(8, Math.round(20 + p.waveComplexity * 20));
-  const xStep = Math.max(2, Math.round(width / 300));
+  const rowCount = Math.max(12, Math.round(30 + p.waveComplexity * 25));
+  const xStep = Math.max(2, Math.round(width / 350));
 
   for (let row = 0; row < rowCount; row++) {
     const rowT = (row + 0.5) / rowCount;
     const baseY = waterTop + rowT * waterHeight;
-    const depthFade = 1 - rowT; // stronger at surface
+    const depthFade = 1 - rowT * 0.8;
+    const ampScale = p.waveHeight * waterHeight * 0.04 * depthFade;
+    const lineWidth = Math.max(0.4, (2 - rowT * 1.2) * (1 + p.chop * 0.5));
 
-    // Wave line with Gerstner displacement
+    // Draw dark trough band first
     ctx.beginPath();
-    const ampScale = p.waveHeight * waterHeight * 0.03 * depthFade;
-
     for (let px = 0; px <= width; px += xStep) {
       const nx = px / width;
       const gy = gerstnerY(waves, nx * 10, row * 0.8) * ampScale;
-
-      if (px === 0) ctx.moveTo(bx + px, baseY + gy);
-      else ctx.lineTo(bx + px, baseY + gy);
+      if (px === 0) ctx.moveTo(bx + px, baseY + gy + lineWidth * 1.5);
+      else ctx.lineTo(bx + px, baseY + gy + lineWidth * 1.5);
     }
-
-    // Shade by slope: bright peaks, dark troughs
-    const slopeAtMid = gerstnerSlope(waves, 0.5 * 10, row * 0.8);
-    const slopeBrightness = 0.5 + slopeAtMid * 0.3;
-    const lineAlpha = Math.max(0.03, 0.15 * depthFade * slopeBrightness);
-
-    ctx.strokeStyle = `rgba(255,255,255,${lineAlpha})`;
-    ctx.lineWidth = Math.max(0.3, (1.5 - rowT) * (1 + p.chop));
+    const darkStrength = 0.08 + p.chop * 0.08;
+    ctx.strokeStyle = `rgba(0,0,0,${Math.max(0.02, darkStrength * depthFade)})`;
+    ctx.lineWidth = lineWidth * 1.5;
     ctx.stroke();
+
+    // Draw bright crest line on top, with per-segment slope-based alpha
+    // Build path segments with varying brightness
+    for (let px = 0; px < width; px += xStep) {
+      const nx = px / width;
+      const nx2 = (px + xStep) / width;
+      const gy1 = gerstnerY(waves, nx * 10, row * 0.8) * ampScale;
+      const gy2 = gerstnerY(waves, nx2 * 10, row * 0.8) * ampScale;
+
+      // Slope determines brightness: positive slope (rising face) = bright
+      const slope = gerstnerSlope(waves, nx * 10, row * 0.8);
+      const slopeFactor = smoothstep(0.5 + slope * 0.5); // 0=trough, 1=crest
+      const brightAlpha = Math.max(0.02, (0.08 + slopeFactor * 0.25) * depthFade);
+
+      ctx.strokeStyle = `rgba(255,255,255,${brightAlpha})`;
+      ctx.lineWidth = lineWidth * (0.6 + slopeFactor * 0.6);
+      ctx.beginPath();
+      ctx.moveTo(bx + px, baseY + gy1);
+      ctx.lineTo(bx + px + xStep, baseY + gy2);
+      ctx.stroke();
+    }
   }
 
-  // Shimmer
+  // Horizon shimmer band
   if (p.shimmerIntensity > 0) {
+    const bandHeight = waterHeight * 0.12;
+    const shimGrad = ctx.createLinearGradient(bx, waterTop, bx, waterTop + bandHeight);
+    shimGrad.addColorStop(0, `rgba(255,255,255,${p.shimmerIntensity * 0.06})`);
+    shimGrad.addColorStop(1, "rgba(255,255,255,0)");
+    ctx.fillStyle = shimGrad;
+    ctx.fillRect(bx, waterTop, width, bandHeight);
+
     renderShimmer(p, ctx, rng, bx, waterTop, width, waterHeight);
   }
 }
@@ -270,46 +317,55 @@ function renderFlow(p: ResolvedSurfaceProps, ctx: CanvasRenderingContext2D, bx: 
   ctx.fillStyle = grad;
   ctx.fillRect(bx, waterTop, width, waterHeight);
 
-  // Flow-field lines following current direction
+  // Flow-field lines with dark/bright pairing (ref: river current photos)
   const rng = mulberry32(p.seed);
   const noise = createFractalNoise(p.seed, 3);
-  const flowDx = Math.cos(p.flowDirection) * p.flowStrength;
-  const flowDy = Math.sin(p.flowDirection) * p.flowStrength;
-  const lineCount = Math.max(5, Math.round(15 + p.waveComplexity * 25));
-  const segmentCount = 40;
+  const lineCount = Math.max(12, Math.round(25 + p.waveComplexity * 35));
+  const segmentCount = 50;
 
   for (let i = 0; i < lineCount; i++) {
-    // Start points spread across the water zone
     let lx = bx + rng() * width;
     let ly = waterTop + rng() * waterHeight;
-    const alpha = Math.max(0.03, 0.15 * (1 - (ly - waterTop) / waterHeight));
+    const depthT = (ly - waterTop) / waterHeight;
+    const depthFade = 1 - depthT * 0.7;
 
-    ctx.strokeStyle = `rgba(255,255,255,${alpha})`;
-    ctx.lineWidth = 0.5 + rng() * 0.5;
-    ctx.beginPath();
-    ctx.moveTo(lx, ly);
-
+    // Build path points first
+    const points: [number, number][] = [[lx, ly]];
     for (let s = 0; s < segmentCount; s++) {
       const nx = (lx - bx) / width;
       const ny = (ly - waterTop) / waterHeight;
-      // Flow direction + noise perturbation
       const n = noise(nx * 4, ny * 4);
       const angle = p.flowDirection + (n - 0.5) * Math.PI * 0.6;
-      const speed = p.flowStrength * 3 + p.waveHeight * 2;
+      const speed = p.flowStrength * 3 + p.waveHeight * 2 + 1;
 
       lx += Math.cos(angle) * speed;
       ly += Math.sin(angle) * speed;
 
-      // Clamp to water zone
       if (lx < bx || lx > bx + width || ly < waterTop || ly > by + height) break;
-
-      ctx.lineTo(lx, ly);
+      points.push([lx, ly]);
     }
+    if (points.length < 3) continue;
+
+    // Dark shadow line (offset below)
+    ctx.strokeStyle = `rgba(0,0,0,${0.06 * depthFade})`;
+    ctx.lineWidth = 1.2 + rng() * 0.8;
+    ctx.beginPath();
+    ctx.moveTo(points[0]![0], points[0]![1] + 1.5);
+    for (let j = 1; j < points.length; j++) ctx.lineTo(points[j]![0], points[j]![1] + 1.5);
+    ctx.stroke();
+
+    // Bright highlight line
+    const brightAlpha = Math.max(0.04, 0.2 * depthFade);
+    ctx.strokeStyle = `rgba(255,255,255,${brightAlpha})`;
+    ctx.lineWidth = 0.5 + rng() * 0.8;
+    ctx.beginPath();
+    ctx.moveTo(points[0]![0], points[0]![1]);
+    for (let j = 1; j < points.length; j++) ctx.lineTo(points[j]![0], points[j]![1]);
     ctx.stroke();
   }
 
-  // Cross-line ripples perpendicular to flow
-  const rippleCount = Math.round(p.waveHeight * 20);
+  // Cross-line ripples perpendicular to flow — more of them, varying length
+  const rippleCount = Math.max(10, Math.round(p.waveHeight * 40 + 10));
   const crossAngle = p.flowDirection + Math.PI / 2;
   const crossDx = Math.cos(crossAngle);
   const crossDy = Math.sin(crossAngle);
@@ -317,11 +373,20 @@ function renderFlow(p: ResolvedSurfaceProps, ctx: CanvasRenderingContext2D, bx: 
   for (let i = 0; i < rippleCount; i++) {
     const cx = bx + rng() * width;
     const cy = waterTop + rng() * waterHeight;
-    const len = 5 + rng() * 15;
-    const rippleAlpha = 0.05 + rng() * 0.1;
+    const depthT = (cy - waterTop) / waterHeight;
+    const len = 3 + rng() * 20;
 
-    ctx.strokeStyle = `rgba(255,255,255,${rippleAlpha})`;
-    ctx.lineWidth = 0.5;
+    // Dark underline
+    ctx.strokeStyle = `rgba(0,0,0,${0.04 * (1 - depthT)})`;
+    ctx.lineWidth = 0.8;
+    ctx.beginPath();
+    ctx.moveTo(cx - crossDx * len, cy - crossDy * len + 1);
+    ctx.lineTo(cx + crossDx * len, cy + crossDy * len + 1);
+    ctx.stroke();
+
+    // Bright line
+    ctx.strokeStyle = `rgba(255,255,255,${(0.06 + rng() * 0.12) * (1 - depthT)})`;
+    ctx.lineWidth = 0.4;
     ctx.beginPath();
     ctx.moveTo(cx - crossDx * len, cy - crossDy * len);
     ctx.lineTo(cx + crossDx * len, cy + crossDy * len);
@@ -343,19 +408,33 @@ function renderShimmer(
   width: number,
   waterHeight: number,
 ): void {
-  const shimmerCount = Math.round(p.shimmerIntensity * 80);
-  ctx.fillStyle = "rgba(255,255,255,0.4)";
+  // Sun sparkle: elongated horizontal flecks concentrated near surface
+  // (ref: sunlight-sparkling-water-surface photos)
+  const shimmerCount = Math.round(p.shimmerIntensity * 120);
+
+  // Sun path: sparkles concentrate in a vertical band (center ± 30% width)
+  const sunCenterX = bx + width * 0.5;
+  const sunSpread = width * 0.35;
 
   for (let i = 0; i < shimmerCount; i++) {
-    const sx = bx + rng() * width;
-    const depthT = rng() * 0.4;
-    const sy = waterTop + depthT * waterHeight;
-    const sw = 1 + rng() * 3;
-    const sh = 0.5 + rng() * 1;
-    const shimAlpha = (1 - depthT) * p.shimmerIntensity * 0.6;
+    // Gaussian-ish distribution around sun path
+    const rawX = bx + rng() * width;
+    const distFromSun = Math.abs(rawX - sunCenterX) / sunSpread;
+    const pathWeight = Math.exp(-distFromSun * distFromSun * 1.5);
 
+    // Concentrate near surface with exponential falloff
+    const depthT = rng() * rng() * 0.5; // squared bias toward surface
+    const sy = waterTop + depthT * waterHeight;
+    const depthFade = 1 - depthT * 1.5;
+
+    const sw = 1 + rng() * 4; // horizontal elongation
+    const sh = 0.3 + rng() * 0.7;
+    const shimAlpha = depthFade * pathWeight * p.shimmerIntensity * 0.5;
+
+    if (shimAlpha < 0.01) continue;
     ctx.globalAlpha = shimAlpha;
-    ctx.fillRect(sx, sy, sw, sh);
+    ctx.fillStyle = "rgba(255,255,255,1)";
+    ctx.fillRect(rawX, sy, sw, sh);
   }
   ctx.globalAlpha = 1;
 }

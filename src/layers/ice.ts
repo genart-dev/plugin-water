@@ -117,46 +117,58 @@ export const iceLayerType: LayerTypeDefinition = {
     }
     ctx.globalAlpha = 1;
 
-    // --- Cracks ---
+    // --- Cracks (ref: frozen-lake-ice-cracks-4685227 — sharp geometric plate fractures) ---
     if (p.crackDensity > 0) {
-      const crackCount = Math.round(p.crackDensity * 25);
+      const crackCount = Math.round(p.crackDensity * 30);
       const [cr, cg, cb] = parseHex(p.crackColor);
 
       for (let i = 0; i < crackCount; i++) {
-        // Random start point
         let cx = bx + rng() * width;
         let cy = waterTop + rng() * waterHeight;
+        // Straighter main direction (real ice cracks are more linear than random walks)
         const mainAngle = rng() * Math.PI * 2;
-        const segments = 5 + Math.round(rng() * 15);
+        const segments = 6 + Math.round(rng() * 20);
+        const crackAlpha = 0.35 + rng() * 0.45;
 
-        ctx.strokeStyle = `rgba(${cr},${cg},${cb},${0.3 + rng() * 0.4})`;
-        ctx.lineWidth = 0.5 + rng() * 1.5;
+        // Main crack line — straighter with smaller angular deviation
+        ctx.strokeStyle = `rgba(${cr},${cg},${cb},${crackAlpha})`;
+        ctx.lineWidth = 0.3 + rng() * 1.2;
         ctx.beginPath();
         ctx.moveTo(cx, cy);
 
         for (let s = 0; s < segments; s++) {
-          const angle = mainAngle + (rng() - 0.5) * 1.2;
-          const len = 3 + rng() * 12;
+          // Tighter angular deviation for straighter cracks
+          const angle = mainAngle + (rng() - 0.5) * 0.6;
+          const len = 5 + rng() * 15;
           cx += Math.cos(angle) * len;
           cy += Math.sin(angle) * len;
 
-          // Stay in bounds
           if (cx < bx || cx > bx + width || cy < waterTop || cy > by + height) break;
           ctx.lineTo(cx, cy);
 
-          // Branch occasionally
-          if (rng() < 0.3 && p.crackDensity > 0.5) {
-            const branchAngle = angle + (rng() > 0.5 ? 1 : -1) * (0.5 + rng() * 0.8);
-            const branchLen = 3 + rng() * 8;
+          // Branch at angular intersections (plate fracture junctions)
+          if (rng() < 0.35 && p.crackDensity > 0.3) {
+            // Branches tend toward 60° or 120° angles (crystalline)
+            const branchOffset = (rng() > 0.5 ? 1 : -1) * (Math.PI / 3 + (rng() - 0.5) * 0.4);
+            const branchAngle = angle + branchOffset;
+            const branchLen = 4 + rng() * 12;
             const bx2 = cx + Math.cos(branchAngle) * branchLen;
             const by2 = cy + Math.sin(branchAngle) * branchLen;
 
+            // Branch with same or slightly thinner stroke
             ctx.moveTo(cx, cy);
             ctx.lineTo(bx2, by2);
             ctx.moveTo(cx, cy);
           }
         }
         ctx.stroke();
+
+        // Thin highlight along crack edge (light catching the crack lip)
+        if (crackAlpha > 0.5) {
+          ctx.strokeStyle = `rgba(255,255,255,${crackAlpha * 0.15})`;
+          ctx.lineWidth = 0.3;
+          ctx.stroke();
+        }
       }
     }
 

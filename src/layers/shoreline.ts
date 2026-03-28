@@ -11,7 +11,7 @@ import { createDepthLaneProperty, createAtmosphericModeProperty, resolveDepthLan
 import type { AtmosphericMode } from "../shared/depth-lanes.js";
 import { getPreset } from "../presets/index.js";
 import type { ShorelinePreset } from "../presets/types.js";
-import { createDefaultProps } from "./shared.js";
+import { createDefaultProps, smoothstep } from "./shared.js";
 
 type ShoreType = "beach" | "rocky" | "marsh" | "riverbank" | "tidal-flat" | "cliff-base";
 type DebrisType = "none" | "seaweed" | "driftwood" | "shells" | "pebbles";
@@ -215,11 +215,14 @@ export const shorelineLayerType: LayerTypeDefinition = {
     const noise = createValueNoise(p.seed);
     const step = Math.max(2, Math.round(width / 200));
 
-    // Shore gradient: dry → wet
+    // Shore gradient: dry sand → distinct dark wet strip → water edge
+    // (ref: aerial-beach-waves-shoreline — 3 clear zones)
     const shoreGrad = ctx.createLinearGradient(bx, shoreTop, bx, waterY);
     shoreGrad.addColorStop(0, shoreColor);
-    shoreGrad.addColorStop(0.7, wetColor);
-    shoreGrad.addColorStop(1, wetColor);
+    shoreGrad.addColorStop(0.55, shoreColor);
+    shoreGrad.addColorStop(0.65, wetColor); // sharp transition to wet sand
+    shoreGrad.addColorStop(0.85, darken(wetColor, 0.8)); // darker wet strip near water
+    shoreGrad.addColorStop(1, darken(wetColor, 0.7));
 
     // Noise-modulated shore shape
     ctx.beginPath();
@@ -236,20 +239,54 @@ export const shorelineLayerType: LayerTypeDefinition = {
     ctx.fillStyle = shoreGrad;
     ctx.fill();
 
-    // Foam line
+    // Wet sand texture — irregular dark patches in the wet zone
+    const wetZoneTop = shoreTop + shoreHeight * 0.6;
+    for (let i = 0; i < 40; i++) {
+      const wx = bx + rng() * width;
+      const wy = wetZoneTop + rng() * (waterY - wetZoneTop);
+      const ww = 3 + rng() * 12;
+      const wh = 1 + rng() * 3;
+      ctx.globalAlpha = 0.05 + rng() * 0.08;
+      ctx.fillStyle = darken(wetColor, 0.6);
+      ctx.fillRect(wx, wy, ww, wh);
+    }
+    ctx.globalAlpha = 1;
+
+    // Lace foam pattern at water edge (ref: wet-sand-beach-waterline photos)
     if (p.foamLine && p.foamIntensity > 0) {
-      ctx.strokeStyle = "rgba(255,255,255,1)";
+      // Lace foam: noise-thresholded white in a band along the waterline
+      const foamBandHeight = shoreHeight * 0.3;
+      const foamCellSize = 2;
 
-      // Wave break style affects foam rendering
+      for (let cy = waterY - foamBandHeight; cy < waterY + 3; cy += foamCellSize) {
+        for (let cx = bx; cx < bx + width; cx += foamCellSize) {
+          const nx = (cx - bx) / width;
+          const bandT = (cy - (waterY - foamBandHeight)) / foamBandHeight;
+          const n = noise(nx * 15, bandT * 8 + 10);
+
+          // Foam concentrates near the waterline (bandT ≈ 1)
+          const proximityBoost = smoothstep(bandT);
+          const threshold = 0.7 - p.foamIntensity * 0.3 - proximityBoost * 0.2;
+          if (n < threshold) continue;
+
+          const foamAlpha = (n - threshold) / (1 - threshold) * p.foamIntensity * 0.7 * (0.3 + proximityBoost * 0.7);
+          ctx.globalAlpha = foamAlpha;
+          ctx.fillStyle = "rgba(255,255,255,1)";
+          ctx.fillRect(cx, cy, foamCellSize, foamCellSize);
+        }
+      }
+      ctx.globalAlpha = 1;
+
+      // Wave break style: distinct foam line strokes on top
       const passCount = p.waveBreakStyle === "plunging" ? 3 : 2;
-      const baseWidth = p.waveBreakStyle === "surging" ? 0.5 : 1 + p.foamIntensity;
-
+      const baseWidth = p.waveBreakStyle === "surging" ? 0.5 : 1.5 + p.foamIntensity;
       ctx.lineWidth = baseWidth;
 
       for (let pass = 0; pass < passCount; pass++) {
-        ctx.globalAlpha = p.foamIntensity * (pass === 0 ? 0.4 : 0.2);
+        ctx.globalAlpha = p.foamIntensity * (pass === 0 ? 0.5 : 0.25);
+        ctx.strokeStyle = "rgba(255,255,255,1)";
         ctx.beginPath();
-        const yOffset = pass * 2;
+        const yOffset = pass * 2.5;
         for (let px = 0; px <= width; px += step) {
           const n = noise(px * 0.015 + pass * 3, 5) * shoreHeight * 0.15;
           const foamN = noise(px * 0.03, 10 + pass) * 2;

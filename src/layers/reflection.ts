@@ -110,62 +110,81 @@ export const reflectionLayerType: LayerTypeDefinition = {
     const [skyR, skyG, skyB] = parseHex(reflectedSky);
     const [terR, terG, terB] = parseHex(reflectedTerrain);
 
-    // Render reflected color bands with noise-based ripple distortion
-    const sliceCount = Math.ceil(w / 2);
-    const rowCount = 20;
+    // Columnar reflection with per-pixel noise distortion (ref: lake-reflection-mountains-mirror)
+    // Vertical column strips avoid the horizontal banding of row-based fills
+    const colCount = Math.ceil(w / 2);
+    const rowCount = 60; // much higher row count eliminates visible banding
 
-    for (let i = 0; i < sliceCount; i++) {
-      const nx = i / sliceCount;
+    for (let col = 0; col < colCount; col++) {
+      const nx = col / colCount;
       const x = bounds.x + nx * w;
-      const sliceW = w / sliceCount + 1;
+      const colW = w / colCount + 1;
 
       for (let row = 0; row < rowCount; row++) {
         const rowT = row / rowCount;
         const y = waterTop + rowT * waterH;
         const rowH = waterH / rowCount + 1;
 
-        // Noise-based ripple distortion
+        // Noise-based ripple distortion — stronger with depth
         const rippleN = noise(
-          nx * (4 + p.reflectionDistortion * 8),
-          rowT * (3 + p.reflectionDistortion * 6),
+          nx * (3 + p.reflectionDistortion * 6),
+          rowT * (2 + p.reflectionDistortion * 4),
         );
-        const rippleOffset = (rippleN - 0.5) * p.reflectionDistortion * 30;
+        const rippleOffset = (rippleN - 0.5) * p.reflectionDistortion * 20 * (1 + rowT);
 
-        // Fresnel effect: stronger reflections near waterline (small angles)
+        // Fresnel effect: strong near waterline, weaker at distance
         const fresnelT = smoothstep(rowT);
-        const fresnelStrength = p.reflectionStrength * (1 - fresnelT * 0.4);
+        const fresnelStrength = p.reflectionStrength * (1 - fresnelT * 0.5);
 
-        // Blend terrain (top) → sky (bottom)
-        const terrainAmount = Math.max(0, 1 - rowT * 2.5);
+        // Reflected content: terrain near waterline → sky at depth
+        const terrainAmount = Math.max(0, 1 - rowT * 2.2);
 
-        // Blur: bands get more transparent near bottom
-        const blurAlpha = fresnelStrength * (1 - p.reflectionBlur * rowT * 0.5);
+        // Progressive blur: alpha decreases with depth
+        const blurAlpha = fresnelStrength * (1 - p.reflectionBlur * rowT * 0.6);
 
-        const r = Math.round(terR * terrainAmount + skyR * (1 - terrainAmount));
-        const g = Math.round(terG * terrainAmount + skyG * (1 - terrainAmount));
+        // Color temperature shift — reflections are slightly cooler/darker
+        const coolShift = rowT * 0.08;
+        const r = Math.round((terR * terrainAmount + skyR * (1 - terrainAmount)) * (1 - coolShift));
+        const g = Math.round((terG * terrainAmount + skyG * (1 - terrainAmount)) * (1 - coolShift * 0.5));
         const b = Math.round(terB * terrainAmount + skyB * (1 - terrainAmount));
 
-        ctx.fillStyle = `rgba(${r},${g},${b},${Math.max(0.1, blurAlpha)})`;
-        ctx.fillRect(x, y + rippleOffset, sliceW, rowH);
+        ctx.fillStyle = `rgba(${r},${g},${b},${Math.max(0.05, blurAlpha)})`;
+        ctx.fillRect(x, y + rippleOffset, colW, rowH);
       }
     }
 
-    // Subtle ripple lines
+    // Subtle horizontal ripple highlights — paired dark/bright
     if (p.reflectionDistortion > 0) {
-      const lineCount = Math.round(p.reflectionDistortion * 15);
+      const lineCount = Math.round(p.reflectionDistortion * 20 + 5);
       for (let i = 0; i < lineCount; i++) {
         const ly = waterTop + rng() * waterH;
+        const depthT = (ly - waterTop) / waterH;
         const n = noise(i * 0.5, p.seed * 0.01);
-        const alpha = 0.05 + n * 0.1;
-        ctx.strokeStyle = `rgba(255,255,255,${alpha})`;
-        ctx.lineWidth = 0.5;
+
+        // Dark line
+        ctx.strokeStyle = `rgba(0,0,0,${0.03 + n * 0.05})`;
+        ctx.lineWidth = 0.6;
         ctx.beginPath();
-        ctx.moveTo(bounds.x, ly);
-        const waveSegments = 10;
+        ctx.moveTo(bounds.x, ly + 1);
+        const waveSegments = 12;
         for (let j = 1; j <= waveSegments; j++) {
           const wt = j / waveSegments;
           const wx = bounds.x + wt * w;
-          const wy = ly + Math.sin(wt * Math.PI * 4 + i) * p.reflectionDistortion * 3;
+          const wy = ly + 1 + Math.sin(wt * Math.PI * 3 + i) * p.reflectionDistortion * 4;
+          ctx.lineTo(wx, wy);
+        }
+        ctx.stroke();
+
+        // Bright line
+        const brightAlpha = (0.04 + n * 0.08) * (1 - depthT * 0.5);
+        ctx.strokeStyle = `rgba(255,255,255,${brightAlpha})`;
+        ctx.lineWidth = 0.4;
+        ctx.beginPath();
+        ctx.moveTo(bounds.x, ly);
+        for (let j = 1; j <= waveSegments; j++) {
+          const wt = j / waveSegments;
+          const wx = bounds.x + wt * w;
+          const wy = ly + Math.sin(wt * Math.PI * 3 + i) * p.reflectionDistortion * 4;
           ctx.lineTo(wx, wy);
         }
         ctx.stroke();

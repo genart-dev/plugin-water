@@ -81,21 +81,27 @@ export const causticsLayerType: LayerTypeDefinition = {
     const waterHeight = height - height * p.waterlinePosition;
     if (waterHeight <= 0 || p.clarity < 0.3) return;
 
+    // Three noise layers: two base + one high-frequency detail (ref: pool caustics 103817)
     const noise1 = createFractalNoise(p.seed + 300, 3);
     const noise2 = createFractalNoise(p.seed + 700, 2);
+    const noiseDetail = createValueNoise(p.seed + 900);
 
     const [br, bg, bb] = parseHex(p.bottomColor);
-    const lightColor = lighten(p.bottomColor, 0.5);
-    const [lr, lg, lb] = parseHex(lightColor);
+    // Warm caustic light — shifted toward yellow-white (ref: shallow caustics photos)
+    const warmLight = lighten(p.bottomColor, 0.6);
+    const [wlr, wlg, wlb] = parseHex(warmLight);
+    // Extra warm: boost red/green relative to blue
+    const lr = Math.min(255, wlr + 30);
+    const lg = Math.min(255, wlg + 15);
+    const lb = wlb;
 
-    // Render caustic pattern as a grid of cells
-    const cellSize = Math.max(3, Math.round(8 * p.causticScale));
+    // Smaller cells for sharper web edges
+    const cellSize = Math.max(2, Math.round(5 * p.causticScale));
     const lightOffsetX = p.lightAngle * 0.3;
 
     for (let cy = waterTop; cy < by + height; cy += cellSize) {
       const depthT = (cy - waterTop) / waterHeight;
-      // Caustics fade with depth and low clarity
-      const depthFade = Math.max(0, 1 - depthT * 1.5) * p.clarity;
+      const depthFade = Math.max(0, 1 - depthT * 1.3) * p.clarity;
       if (depthFade < 0.01) continue;
 
       for (let cx = bx; cx < bx + width; cx += cellSize) {
@@ -103,19 +109,27 @@ export const causticsLayerType: LayerTypeDefinition = {
         const ny = (cy - waterTop) / waterHeight;
 
         // Two overlapping noise patterns create caustic web
-        const n1 = noise1((nx + lightOffsetX) * (6 / p.causticScale), ny * (4 / p.causticScale));
-        const n2 = noise2(nx * (8 / p.causticScale), (ny + 0.5) * (5 / p.causticScale));
+        const freq = 8 / p.causticScale;
+        const n1 = noise1((nx + lightOffsetX) * freq * 0.75, ny * freq * 0.5);
+        const n2 = noise2(nx * freq, (ny + 0.5) * freq * 0.625);
 
         // Caustic intensity: bright where both noise patterns peak
-        const caustic = Math.max(0, n1 + n2 - 1) * 2;
-        if (caustic < 0.1) continue;
+        const causticRaw = Math.max(0, n1 + n2 - 1) * 2;
 
-        const intensity = caustic * p.causticIntensity * depthFade;
+        // High-frequency detail adds fine web structure
+        const detail = noiseDetail(nx * freq * 2, ny * freq * 1.5);
+        const caustic = causticRaw * (0.6 + detail * 0.6);
+        if (caustic < 0.08) continue;
+
+        // Sharper edges: apply power curve to concentrate brightness
+        const sharpCaustic = Math.pow(caustic, 0.7);
+        const intensity = sharpCaustic * p.causticIntensity * depthFade;
+
         const r = Math.round(br + (lr - br) * intensity);
         const g = Math.round(bg + (lg - bg) * intensity);
         const b = Math.round(bb + (lb - bb) * intensity);
 
-        ctx.globalAlpha = intensity * 0.6;
+        ctx.globalAlpha = Math.min(0.8, intensity * 0.7);
         ctx.fillStyle = `rgb(${r},${g},${b})`;
         ctx.fillRect(cx, cy, cellSize, cellSize);
       }
