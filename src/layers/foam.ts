@@ -119,7 +119,8 @@ export const foamLayerType: LayerTypeDefinition = {
 
     // --- Lace-like foam patches using noise thresholding ---
     // (ref: sea-foam-pattern-water-2757088 — fractal connected white networks)
-    const cellSize = 2;
+    // 1px cells for fine lace detail; real foam has intricate web structure
+    const cellSize = 1;
     // foamAmount 0.2→threshold 0.65, foamAmount 0.9→threshold 0.28
     const foamThreshold = 0.75 - p.foamAmount * 0.55;
 

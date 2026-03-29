@@ -110,20 +110,19 @@ export const reflectionLayerType: LayerTypeDefinition = {
     const [skyR, skyG, skyB] = parseHex(reflectedSky);
     const [terR, terG, terB] = parseHex(reflectedTerrain);
 
-    // Columnar reflection with per-pixel noise distortion (ref: lake-reflection-mountains-mirror)
-    // Vertical column strips avoid the horizontal banding of row-based fills
-    const colCount = Math.ceil(w / 2);
-    const rowCount = 60; // much higher row count eliminates visible banding
+    // Per-pixel reflection with noise distortion (ref: lake-reflection-mountains-mirror)
+    // 1px-wide columns eliminate visible banding entirely
+    const cellH = 2;
+    const colStep = 2;
+    const rowCount = Math.ceil(waterH / cellH);
 
-    for (let col = 0; col < colCount; col++) {
-      const nx = col / colCount;
-      const x = bounds.x + nx * w;
-      const colW = w / colCount + 1;
+    for (let col = 0; col < w; col += colStep) {
+      const nx = col / w;
+      const x = bounds.x + col;
 
       for (let row = 0; row < rowCount; row++) {
         const rowT = row / rowCount;
         const y = waterTop + rowT * waterH;
-        const rowH = waterH / rowCount + 1;
 
         // Noise-based ripple distortion — stronger with depth
         const rippleN = noise(
@@ -149,7 +148,7 @@ export const reflectionLayerType: LayerTypeDefinition = {
         const b = Math.round(terB * terrainAmount + skyB * (1 - terrainAmount));
 
         ctx.fillStyle = `rgba(${r},${g},${b},${Math.max(0.05, blurAlpha)})`;
-        ctx.fillRect(x, y + rippleOffset, colW, rowH);
+        ctx.fillRect(x, y + rippleOffset, colStep + 1, cellH + 1);
       }
     }
 

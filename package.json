@@ -1,6 +1,6 @@
 {
   "name": "@genart-dev/plugin-water",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Water effects for genart.dev — surface waves, reflections, foam, shoreline, caustics, and ice layers",
   "type": "module",
   "main": "./dist/index.cjs",

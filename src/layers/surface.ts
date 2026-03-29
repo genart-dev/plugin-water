@@ -174,42 +174,64 @@ function renderCalm(p: ResolvedSurfaceProps, ctx: CanvasRenderingContext2D, bx: 
 
   // Paired dark-trough / bright-crest wave lines (ref: still-lake photo 3085701)
   // Real calm water has alternating dark/bright bands from wave facets
+  // More lines + varying wavelength = organic, not mechanical
   const rng = mulberry32(p.seed);
   const noise = createValueNoise(p.seed);
-  const lineCount = Math.max(8, Math.round(p.waveHeight * 50 + 12));
-  const step = Math.max(2, Math.round(width / 250));
+  const noiseDetail = createFractalNoise(p.seed + 50, 2);
+  const lineCount = Math.max(15, Math.round(p.waveHeight * 80 + 25));
+  const step = Math.max(1, Math.round(width / 400));
 
   for (let i = 0; i < lineCount; i++) {
-    // Depth-compressed spacing: lines cluster near surface, spread toward bottom
-    const t = (i + 0.5) / lineCount;
+    // Depth-compressed spacing with per-line jitter for organic feel
+    const t = (i + 0.3 + rng() * 0.4) / lineCount;
     const compressed = t * t; // quadratic compression — more lines near waterline
     const lineY = waterTop + compressed * waterHeight;
     const depthFade = 1 - compressed;
 
+    // Vary noise frequency per line so lines don't all have the same wavelength
+    const freqMult = 0.008 + rng() * 0.015;
+    const ampMult = p.waveHeight * (4 + rng() * 6);
+
     // Dark trough line (slightly below)
-    const darkAlpha = Math.max(0.02, 0.12 * depthFade * (0.5 + p.waveHeight * 0.5));
+    const darkAlpha = Math.max(0.02, 0.15 * depthFade * (0.5 + p.waveHeight * 0.5));
     ctx.strokeStyle = `rgba(0,0,0,${darkAlpha})`;
-    ctx.lineWidth = Math.max(0.5, (1.2 - compressed * 0.8) * (1 + p.waveHeight * 0.5));
+    ctx.lineWidth = Math.max(0.5, (1.5 - compressed * 0.8) * (0.8 + p.waveHeight * 0.6));
     ctx.beginPath();
     for (let px = 0; px <= width; px += step) {
-      const offset = (noise(px * 0.015, i * 5 + 1) - 0.5) * p.waveHeight * 6;
+      const offset = (noise(px * freqMult, i * 5 + 1) - 0.5) * ampMult;
       if (px === 0) ctx.moveTo(bx + px, lineY + offset + 1.5);
       else ctx.lineTo(bx + px, lineY + offset + 1.5);
     }
     ctx.stroke();
 
     // Bright crest line (on top)
-    const brightAlpha = Math.max(0.03, 0.25 * depthFade * (0.4 + p.waveHeight * 0.6));
+    const brightAlpha = Math.max(0.03, 0.3 * depthFade * (0.4 + p.waveHeight * 0.6));
     ctx.strokeStyle = `rgba(255,255,255,${brightAlpha})`;
     ctx.lineWidth = Math.max(0.3, (0.8 - compressed * 0.4));
     ctx.beginPath();
     for (let px = 0; px <= width; px += step) {
-      const offset = (noise(px * 0.015, i * 5) - 0.5) * p.waveHeight * 6;
+      const offset = (noise(px * freqMult, i * 5) - 0.5) * ampMult;
       if (px === 0) ctx.moveTo(bx + px, lineY + offset);
       else ctx.lineTo(bx + px, lineY + offset);
     }
     ctx.stroke();
   }
+
+  // Subtle color variation — soft noise-based hue shifts across the surface
+  // Use many small semi-transparent dots instead of blocky rectangles
+  const patchCount = Math.round(200 + p.waveHeight * 100);
+  for (let i = 0; i < patchCount; i++) {
+    const px = bx + rng() * width;
+    const py = waterTop + rng() * waterHeight * 0.7;
+    const depthT = (py - waterTop) / waterHeight;
+    const n = noiseDetail(px * 0.003, py * 0.003);
+    ctx.globalAlpha = (0.01 + n * 0.02) * (1 - depthT);
+    ctx.fillStyle = n > 0.5 ? "rgba(200,220,255,1)" : "rgba(0,20,50,1)";
+    ctx.beginPath();
+    ctx.arc(px, py, 3 + rng() * 8, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
 
   // Horizon shimmer band — concentrated glare near waterline
   if (p.shimmerIntensity > 0) {
@@ -317,11 +339,12 @@ function renderFlow(p: ResolvedSurfaceProps, ctx: CanvasRenderingContext2D, bx: 
   ctx.fillStyle = grad;
   ctx.fillRect(bx, waterTop, width, waterHeight);
 
-  // Flow-field lines with dark/bright pairing (ref: river current photos)
+  // Dense flow-field lines with dark/bright pairing (ref: river current photos)
+  // Rivers have many visible current streaks layered over each other
   const rng = mulberry32(p.seed);
   const noise = createFractalNoise(p.seed, 3);
-  const lineCount = Math.max(12, Math.round(25 + p.waveComplexity * 35));
-  const segmentCount = 50;
+  const lineCount = Math.max(40, Math.round(80 + p.waveComplexity * 100));
+  const segmentCount = 60;
 
   for (let i = 0; i < lineCount; i++) {
     let lx = bx + rng() * width;
@@ -347,25 +370,25 @@ function renderFlow(p: ResolvedSurfaceProps, ctx: CanvasRenderingContext2D, bx: 
     if (points.length < 3) continue;
 
     // Dark shadow line (offset below)
-    ctx.strokeStyle = `rgba(0,0,0,${0.06 * depthFade})`;
-    ctx.lineWidth = 1.2 + rng() * 0.8;
+    ctx.strokeStyle = `rgba(0,0,0,${0.08 * depthFade})`;
+    ctx.lineWidth = 1.0 + rng() * 1.2;
     ctx.beginPath();
     ctx.moveTo(points[0]![0], points[0]![1] + 1.5);
     for (let j = 1; j < points.length; j++) ctx.lineTo(points[j]![0], points[j]![1] + 1.5);
     ctx.stroke();
 
-    // Bright highlight line
-    const brightAlpha = Math.max(0.04, 0.2 * depthFade);
+    // Bright highlight line — varying width for natural feel
+    const brightAlpha = Math.max(0.06, 0.25 * depthFade);
     ctx.strokeStyle = `rgba(255,255,255,${brightAlpha})`;
-    ctx.lineWidth = 0.5 + rng() * 0.8;
+    ctx.lineWidth = 0.3 + rng() * 1.0;
     ctx.beginPath();
     ctx.moveTo(points[0]![0], points[0]![1]);
     for (let j = 1; j < points.length; j++) ctx.lineTo(points[j]![0], points[j]![1]);
     ctx.stroke();
   }
 
-  // Cross-line ripples perpendicular to flow — more of them, varying length
-  const rippleCount = Math.max(10, Math.round(p.waveHeight * 40 + 10));
+  // Cross-line ripples perpendicular to flow — dense field of short marks
+  const rippleCount = Math.max(30, Math.round(p.waveHeight * 120 + 40));
   const crossAngle = p.flowDirection + Math.PI / 2;
   const crossDx = Math.cos(crossAngle);
   const crossDy = Math.sin(crossAngle);
@@ -374,19 +397,20 @@ function renderFlow(p: ResolvedSurfaceProps, ctx: CanvasRenderingContext2D, bx: 
     const cx = bx + rng() * width;
     const cy = waterTop + rng() * waterHeight;
     const depthT = (cy - waterTop) / waterHeight;
-    const len = 3 + rng() * 20;
+    const depthFade = 1 - depthT * 0.7;
+    const len = 2 + rng() * 15;
 
     // Dark underline
-    ctx.strokeStyle = `rgba(0,0,0,${0.04 * (1 - depthT)})`;
-    ctx.lineWidth = 0.8;
+    ctx.strokeStyle = `rgba(0,0,0,${0.06 * depthFade})`;
+    ctx.lineWidth = 0.6 + rng() * 0.4;
     ctx.beginPath();
     ctx.moveTo(cx - crossDx * len, cy - crossDy * len + 1);
     ctx.lineTo(cx + crossDx * len, cy + crossDy * len + 1);
     ctx.stroke();
 
     // Bright line
-    ctx.strokeStyle = `rgba(255,255,255,${(0.06 + rng() * 0.12) * (1 - depthT)})`;
-    ctx.lineWidth = 0.4;
+    ctx.strokeStyle = `rgba(255,255,255,${(0.08 + rng() * 0.15) * depthFade})`;
+    ctx.lineWidth = 0.3 + rng() * 0.3;
     ctx.beginPath();
     ctx.moveTo(cx - crossDx * len, cy - crossDy * len);
     ctx.lineTo(cx + crossDx * len, cy + crossDy * len);
